@@ -56,3 +56,28 @@ void ht_del(hash_table *ht)
     free(ht->items);
     free(ht);
 }
+
+// Hash function
+// - Take a string as input and return a number between 0 and m
+//   (the desired bucket array length)
+// - Return an even distribution of bucket indices for an average set of inputs
+static int hash_fn(const char *str, const int prime, const int bucket_size)
+{
+    long hashed = 0;
+    const int len_str = strlen(str);
+    for (int i = 0; i < len_str; i++)
+    {
+        // Raise prime to a decreasing exponent, then multiply by the ASCII value of str[i].
+        // (This gives greater weights for earlier characters in the string)
+        hashed += (long)pow(prime, len_str - (i + 1)) * str[i];
+
+        // Keep hashed within bucket_size
+        hashed %= bucket_size; 
+    }
+
+    return (int)hashed;
+
+    // Pathological inputs:
+    // - The set of inputs that all hash to the same value
+    // - Searching for those keys will take O(n) instead of O(1)
+}
