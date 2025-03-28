@@ -19,3 +19,12 @@ void ht_del(hash_table *ht);
 
 const HT_PRIME_1 = 53; // placeholder
 const HT_PRIME_2 = 57; // placeholder
+
+// Insert a key-value pair
+void ht_insert(hash_table *ht, const char *key, const char *value);
+
+// Search an item by key
+char* ht_search(hash_table *ht, const char *key);
+
+// Delete an item
+void ht_delete(hash_table *ht, const char *key);

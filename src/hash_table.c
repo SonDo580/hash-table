@@ -82,13 +82,95 @@ static int hash_fn(const char *str, const int prime, const int bucket_size)
     // - Searching for those keys will take O(n) instead of O(1)
 }
 
-// Handle collision with double hashing
+// Handle collision
+// Technique: Open addressing with double hashing
 // - Calculate the index an item should be stored at after 'attempt' collisions
 // - We plus 1 to hash_b to avoid getting the same index over and over again.
-static int get_hash(
+static int ht_get_hash(
     const char *str, const int bucket_size, const int attempt)
 {
     const int hash_a = hash_fn(str, HT_PRIME_1, bucket_size);
     const int hash_b = hash_fn(str, HT_PRIME_2, bucket_size);
     return (hash_a + (attempt * (hash_b + 1))) % bucket_size;
+}
+
+// Insert a key-value pair
+// - Iterate through the indices until we find an empty bucket
+// - Insert the item into that bucket and increment hash table's size
+void ht_insert(hash_table *ht, const char *key, const char *value)
+{
+    ht_item *item = ht_new_item(key, value);
+    int index = ht_get_hash(item->key, ht->capacity, 0);
+
+    ht_item *existing_item = ht->items[index];
+    int attempt = 1;
+    while (existing_item != NULL)
+    {
+        // Overwrite value to the same key (don't increment size)
+        if (existing_item != &HT_DELETED_ITEM && strcmp(item->key, key) == 0) {
+            ht_del_item(existing_item);
+            ht->items[index] = item;
+            return;
+        }
+
+        index = ht_get_hash(item->key, ht->capacity, attempt);
+        existing_item = ht->items[index];
+        attempt++;
+    }
+
+    // Insert the new item
+    ht->items[index] = item;
+    ht->size++;
+}
+
+// Search value by key
+// - Calculate the index and compare item key with search key
+// - If the keys are equal, return the item value
+// - If hitting a NULL bucket, return NULL (item not found)
+char *ht_search(hash_table *ht, const char *key)
+{
+    int index = ht_get_hash(key, ht->capacity, 0);
+    ht_item *item = ht->items[index];
+
+    int attempt = 1;
+    while (item != NULL)
+    {
+        if (item != &HT_DELETED_ITEM && strcmp(item->key, key) == 0)
+        {
+            // Return the value
+            return item->value;
+        }
+
+        index = ht_get_hash(key, ht->size, attempt);
+        item = ht->items[index];
+        attempt++;
+    }
+
+    return NULL;
+}
+
+// Delete an item
+// - We cannot simply remove the item, as it will break the collision chain.
+// - Just mark the item as deleted
+static ht_item HT_DELETED_ITEM = {NULL, NULL};
+
+void ht_delete(hash_table *ht, const char *key)
+{
+    int index = ht_get_hash(key, ht->size, 0);
+    ht_item *item = ht->items[index];
+
+    int attempt = 1;
+    while (item != NULL)
+    {
+        if (item != &HT_DELETED_ITEM && strcmp(item->key, key) == 0)
+        {
+            ht_del_item(item);
+            ht->items[index] = &HT_DELETED_ITEM;
+            ht->size--;
+            return;
+        }
+
+        index = ht_get_hash(key, ht->size, attempt);
+        attempt++;
+    }
 }
