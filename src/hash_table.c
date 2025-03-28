@@ -72,7 +72,7 @@ static int hash_fn(const char *str, const int prime, const int bucket_size)
         hashed += (long)pow(prime, len_str - (i + 1)) * str[i];
 
         // Keep hashed within bucket_size
-        hashed %= bucket_size; 
+        hashed %= bucket_size;
     }
 
     return (int)hashed;
@@ -80,4 +80,15 @@ static int hash_fn(const char *str, const int prime, const int bucket_size)
     // Pathological inputs:
     // - The set of inputs that all hash to the same value
     // - Searching for those keys will take O(n) instead of O(1)
+}
+
+// Handle collision with double hashing
+// - Calculate the index an item should be stored at after 'attempt' collisions
+// - We plus 1 to hash_b to avoid getting the same index over and over again.
+static int get_hash(
+    const char *str, const int bucket_size, const int attempt)
+{
+    const int hash_a = hash_fn(str, HT_PRIME_1, bucket_size);
+    const int hash_b = hash_fn(str, HT_PRIME_2, bucket_size);
+    return (hash_a + (attempt * (hash_b + 1))) % bucket_size;
 }
