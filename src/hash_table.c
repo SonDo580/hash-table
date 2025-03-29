@@ -42,7 +42,7 @@ static HashTableItem *ht_new_item(const char *key, const char *value)
 // Utility: Free an item
 static void ht_destroy_item(HashTableItem *item)
 {
-    if (!item)
+    if (!item || item == &HT_DELETED_ITEM)
     {
         return;
     }
@@ -88,14 +88,16 @@ HashTable *ht_new()
 // Public: Free the hash table
 void ht_destroy(HashTable *ht)
 {
+    if (!ht)
+    {
+        return;
+    }
+
     // Free each stored item before freeing the items array
     for (int i = 0; i < ht->size; i++)
     {
         HashTableItem *item = ht->items[i];
-        if (item != NULL)
-        {
-            ht_destroy_item(item);
-        }
+        ht_destroy_item(item);
     }
 
     free(ht->items); // Free the array that holds pointers to items
@@ -217,7 +219,7 @@ void ht_insert(HashTable *ht, const char *key, const char *value)
     while (existing_item != NULL)
     {
         // Overwrite value if the key already exists
-        if (existing_item != &HT_DELETED_ITEM && strcmp(item->key, key) == 0)
+        if (existing_item != &HT_DELETED_ITEM && strcmp(existing_item->key, key) == 0)
         {
             ht_destroy_item(existing_item);
             ht->items[index] = item;
