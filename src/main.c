@@ -2,6 +2,7 @@
 
 int main()
 {
-    hash_table *ht = ht_new();
-    ht_del(ht);
+    // Driver code
+    HashTable *ht = ht_new();
+    ht_destroy(ht);
 }

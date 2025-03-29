@@ -1,31 +1,33 @@
+#ifndef HASH_TABLE_H
+#define HASH_TABLE_H
+
+// Structs
 typedef struct
 {
     char *key;
     char *value;
-} ht_item;
+} HashTableItem;
 
 typedef struct
 {
-    int base_size;
-    int size;
-    int count;
-    ht_item **items; // an array of pointers to items
-} hash_table;
+    int base_size;         // Base number used to determine the table size
+    int size;              // Total number of buckets
+    int count;             // Number of items stored
+    HashTableItem **items; // An array of pointers to items
+} HashTable;
 
-// Initialize hash table
-hash_table *ht_new();
+// Constants
+static const int HT_INITIAL_BASE_SIZE = 53;   // minimum size (a prime)
+static const int HT_PRIME_1 = 53;             // first prime for double hashing
+static const int HT_PRIME_2 = 59;             // second prime for double hashing
+static const int HT_MAX_LOAD_PERCENTAGE = 70; // trigger resize up
+static const int HT_MIN_LOAD_PERCENTAGE = 10; // trigger resize down
 
-// Delete hash table
-void ht_del(hash_table *ht);
+// Core functions
+HashTable *ht_new();                                               // Initialize hash table
+void ht_destroy(HashTable *ht);                                    // Delete hash table
+void ht_insert(HashTable *ht, const char *key, const char *value); // Insert a key-value pair
+char *ht_search(HashTable *ht, const char *key);                   // Search for value by key
+void ht_delete(HashTable *ht, const char *key);                    // Delete item by key
 
-const HT_PRIME_1 = 53; // placeholder
-const HT_PRIME_2 = 57; // placeholder
-
-// Insert a key-value pair
-void ht_insert(hash_table *ht, const char *key, const char *value);
-
-// Search an item by key
-char* ht_search(hash_table *ht, const char *key);
-
-// Delete an item
-void ht_delete(hash_table *ht, const char *key);
+#endif

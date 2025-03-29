@@ -23,9 +23,7 @@ int is_prime(const int x)
     for (int i = 3; i <= floor(sqrt((double)x)); i += 2)
     {
         if ((x % i) == 0)
-        {
             return 0;
-        }
     }
 
     return 1;

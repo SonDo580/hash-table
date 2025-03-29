@@ -1,130 +1,230 @@
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "hash_table.h"
 #include "prime.h"
 
-// Initialize item
-static ht_item *ht_new_item(const char *key, const char *value)
+// Special marker for deleted items
+static HashTableItem HT_DELETED_ITEM = {NULL, NULL};
+
+// Utility: Create a new item
+static HashTableItem *ht_new_item(const char *key, const char *value)
 {
-    ht_item *item = malloc(sizeof(ht_item));
+    HashTableItem *item = malloc(sizeof(HashTableItem));
+    if (!item)
+    {
+        fprintf(stderr, "Error: Memory allocation failed for HashTableItem\n");
+        exit(EXIT_FAILURE);
+    }
+
     item->key = strdup(key);
+    if (!item->key)
+    {
+        free(item);
+        fprintf(stderr, "Error: Memory allocation failed for key duplication\n");
+        exit(EXIT_FAILURE);
+    }
+
     item->value = strdup(value);
+    if (!item->value)
+    {
+        free(item->key);
+        free(item);
+        fprintf(stderr, "Error: Memory allocation failed for value duplication\n");
+        exit(EXIT_FAILURE);
+    }
+
     return item;
-
-    // Note: Save copies of 'key' and 'value'
 }
 
-static hash_table *ht_new_sized(const int base_size)
+// Utility: Free an item
+static void ht_destroy_item(HashTableItem *item)
 {
-    hash_table *ht = xmalloc(sizeof(hash_table));
-    ht->base_size = base_size;
-    ht->size = next_prime(base_size);
-    ht->count = 0;
-    ht->items = xcalloc((size_t)ht->size, sizeof(ht_item *));
-    return ht;
-}
+    if (!item)
+    {
+        return;
+    }
 
-// Initialize hash table
-static int HT_INITIAL_BASE_SIZE = 53;
-// Why use 53:
-// - Prime numbers are often used for hash table sizes to reduce collisions.
-// - It prevents issues with certain hash functions that may distribute keys poorly.
-
-static hash_table *ht_new()
-{
-    return ht_new_sized(HT_INITIAL_BASE_SIZE);
-}
-
-// Delete item
-static void ht_del_item(ht_item *item)
-{
     free(item->key);
     free(item->value);
     free(item);
 }
 
-// Delete hash table
-void ht_del(hash_table *ht)
+// Utility: Create hash table with the specified base size
+// - base_size is used to find the next prime number,
+//   which is used as the hash table size
+static HashTable *ht_new_sized(const int base_size)
 {
+    HashTable *ht = malloc(sizeof(HashTable));
+    if (!ht)
+    {
+        fprintf(stderr, "Error: Memory allocation failed for HashTable\n");
+        exit(EXIT_FAILURE);
+    }
+
+    ht->base_size = base_size;
+    ht->size = next_prime(base_size);
+    ht->count = 0;
+
+    ht->items = calloc((size_t)ht->size, sizeof(HashTableItem *));
+    if (!ht->items)
+    {
+        fprintf(stderr, "Error: Memory allocation failed for HashTable items\n");
+        free(ht);
+        exit(EXIT_FAILURE);
+    }
+
+    return ht;
+}
+
+// Public: Initialize hash table
+HashTable *ht_new()
+{
+    return ht_new_sized(HT_INITIAL_BASE_SIZE);
+}
+
+// Public: Free the hash table
+void ht_destroy(HashTable *ht)
+{
+    // Free each stored item before freeing the items array
     for (int i = 0; i < ht->size; i++)
     {
-        ht_item *item = ht->items[i];
+        HashTableItem *item = ht->items[i];
         if (item != NULL)
         {
-            ht_del_item(item);
+            ht_destroy_item(item);
         }
     }
 
-    free(ht->items);
-    free(ht);
+    free(ht->items); // Free the array that holds pointers to items
+    free(ht);        // Free the hash table
 }
 
-// Hash function
-// - Take a string as input and return a number between 0 and m
-//   (the desired bucket array length)
-// - Return an even distribution of bucket indices for an average set of inputs
-static int hash_fn(const char *str, const int prime, const int bucket_size)
+// Hash function: Map a string to an index in the hash table
+// - Use a prime number as multiplier to reduce clustering
+// - Ensure an even distribution of hash values for an average set of inputs
+static int ht_hash(const char *str, const int prime, const int bucket_size)
 {
     long hashed = 0;
     const int len_str = strlen(str);
     for (int i = 0; i < len_str; i++)
     {
-        // Raise prime to a decreasing exponent, then multiply by the ASCII value of str[i].
-        // (This gives greater weights for earlier characters in the string)
+        // Weighted character contribution:
+        // - Multiply ASCII value of str[i] by prime^(position weight)
+        // - Gives higher weight to earlier characters in the string
         hashed += (long)pow(prime, len_str - (i + 1)) * str[i];
 
-        // Keep hashed within bucket_size
+        // Keep hash value within bucket_size
         hashed %= bucket_size;
     }
 
     return (int)hashed;
 
-    // Pathological inputs:
-    // - The set of inputs that all hash to the same value
+    // Note:
+    // - Pathological inputs is the set of inputs that all hash to the same value
     // - Searching for those keys will take O(n) instead of O(1)
 }
 
-// Handle collision
-// Technique: Open addressing with double hashing
+// Collision resolution: Open Addressing with Double Hashing
 // - Calculate the index an item should be stored at after 'attempt' collisions
-// - We plus 1 to hash_b to avoid getting the same index over and over again.
-static int ht_get_hash(
+// - Avoid clustering issue seen in linear probing
+static int ht_get_index(
     const char *str, const int bucket_size, const int attempt)
 {
-    const int hash_a = hash_fn(str, HT_PRIME_1, bucket_size);
-    const int hash_b = hash_fn(str, HT_PRIME_2, bucket_size);
+    const int hash_a = ht_hash(str, HT_PRIME_1, bucket_size);
+    const int hash_b = ht_hash(str, HT_PRIME_2, bucket_size);
+
+    // Avoid getting stuck in a cycle by adding 1 to `hash_b`
     return (hash_a + (attempt * (hash_b + 1))) % bucket_size;
 }
 
-// Insert a key-value pair
-// - Iterate through the indices until we find an empty bucket
-// - Insert the item into that bucket and increment hash table's size
-void ht_insert(hash_table *ht, const char *key, const char *value)
+// Utility: Calculate load factor (filled buckets / total buckets)
+// - use percentage to avoid floating point math
+static int load_percentage(HashTable *ht)
 {
-    // Resize up if the load is above 0.7
+    return ht->count * 100 / ht->size;
+}
+
+// Utility: Resize hash table
+static void ht_resize(HashTable *ht, const int base_size)
+{
+    // Don't reduce the size below the minimum
+    if (base_size < HT_INITIAL_BASE_SIZE)
+    {
+        return;
+    }
+
+    // Create a new hash table with updated size
+    HashTable *new_ht = ht_new_sized(base_size);
+
+    // Insert existing items into the new hash table
+    for (int i = 0; i < ht->size; i++)
+    {
+        HashTableItem *item = ht->items[i];
+        if (item != NULL && item != &HT_DELETED_ITEM)
+        {
+            ht_insert(new_ht, item->key, item->value);
+        }
+    }
+
+    // Give new_ht ht's size and items, then delete new_ht
+    // (free memory used by the old ht)
+    const int temp_size = ht->size;
+    HashTableItem **temp_items = ht->items;
+
+    ht->size = new_ht->size;
+    ht->items = new_ht->items;
+    ht->base_size = new_ht->base_size;
+    ht->count = new_ht->count;
+
+    new_ht->size = temp_size;
+    new_ht->items = temp_items;
+    ht_destroy(new_ht);
+}
+
+// Helper: resize up when load is high
+static void ht_resize_up(HashTable *ht)
+{
+    const int new_base_size = ht->base_size * 2;
+    ht_resize(ht, new_base_size);
+}
+
+// Helper: resize down when load is low
+static void ht_resize_down(HashTable *ht)
+{
+    const int new_base_size = ht->base_size / 2;
+    ht_resize(ht, new_base_size);
+}
+
+// Public: Insert a key-value pair
+void ht_insert(HashTable *ht, const char *key, const char *value)
+{
+    // Resize up if needed
     const int load = load_percentage(ht);
-    if (load > 70)
+    if (load > HT_MAX_LOAD_PERCENTAGE)
     {
         ht_resize_up(ht);
     }
 
-    ht_item *item = ht_new_item(key, value);
-    int index = ht_get_hash(item->key, ht->size, 0);
+    // Create a new item
+    HashTableItem *item = ht_new_item(key, value);
 
-    ht_item *existing_item = ht->items[index];
+    int index = ht_get_index(item->key, ht->size, 0);
+    HashTableItem *existing_item = ht->items[index];
     int attempt = 1;
     while (existing_item != NULL)
     {
-        // Overwrite value to the same key
+        // Overwrite value if the key already exists
         if (existing_item != &HT_DELETED_ITEM && strcmp(item->key, key) == 0)
         {
-            ht_del_item(existing_item);
+            ht_destroy_item(existing_item);
             ht->items[index] = item;
             return;
         }
 
-        index = ht_get_hash(item->key, ht->size, attempt);
+        // Probe for the next index if collision occurs
+        index = ht_get_index(item->key, ht->size, attempt);
         existing_item = ht->items[index];
         attempt++;
     }
@@ -134,114 +234,58 @@ void ht_insert(hash_table *ht, const char *key, const char *value)
     ht->count++;
 }
 
-// Search value by key
-// - Calculate the index and compare item key with search key
-// - If the keys are equal, return the item value
-// - If hitting a NULL bucket, return NULL (item not found)
-char *ht_search(hash_table *ht, const char *key)
+// Public: Search value by key
+char *ht_search(HashTable *ht, const char *key)
 {
-    int index = ht_get_hash(key, ht->size, 0);
-    ht_item *item = ht->items[index];
-
+    int index = ht_get_index(key, ht->size, 0);
+    HashTableItem *item = ht->items[index];
     int attempt = 1;
     while (item != NULL)
     {
+        // If key is found and not marked as deleted, return the value
         if (item != &HT_DELETED_ITEM && strcmp(item->key, key) == 0)
         {
-            // Return the value
             return item->value;
         }
 
-        index = ht_get_hash(key, ht->size, attempt);
+        // Continue probing
+        index = ht_get_index(key, ht->size, attempt);
         item = ht->items[index];
         attempt++;
     }
 
-    return NULL;
+    return NULL; // Not found
 }
 
-// Delete an item
-// - We cannot simply remove the item, as it will break the collision chain.
-// - Just mark the item as deleted
-static ht_item HT_DELETED_ITEM = {NULL, NULL};
-
-void ht_delete(hash_table *ht, const char *key)
+// Public: Delete an item by key
+// - We cannot remove the item, as it will break the collision chain
+// - Just mark it as deleted
+void ht_delete(HashTable *ht, const char *key)
 {
-    // Resize down if the load is below 0.1
+    // Resize down if needed
     const int load = load_percentage(ht);
-    if (load < 10)
+    if (load < HT_MIN_LOAD_PERCENTAGE)
     {
         ht_resize_down(ht);
     }
 
-    int index = ht_get_hash(key, ht->size, 0);
-    ht_item *item = ht->items[index];
-
+    int index = ht_get_index(key, ht->size, 0);
+    HashTableItem *item = ht->items[index];
     int attempt = 1;
     while (item != NULL)
     {
+        // If the item is found, perform the deletion
         if (item != &HT_DELETED_ITEM && strcmp(item->key, key) == 0)
         {
-            ht_del_item(item);
+            ht_destroy_item(item);
             ht->items[index] = &HT_DELETED_ITEM;
             ht->count--;
             return;
         }
 
-        index = ht_get_hash(key, ht->size, attempt);
+        // Continue probing
+        index = ht_get_index(key, ht->size, attempt);
+        item = ht->items[index];
         attempt++;
     }
-}
-
-// Resize hash table
-static void ht_resize(hash_table *ht, const int base_size)
-{
-    // Don't reduce the size below the minimum
-    if (base_size < HT_INITIAL_BASE_SIZE)
-    {
-        return;
-    }
-
-    hash_table *new_ht = ht_new_sized(base_size);
-    for (int i = 0; i < ht->size; i++)
-    {
-        ht_item *item = ht->items[i];
-        if (item != NULL && item != &HT_DELETED_ITEM)
-        {
-            ht_insert(new_ht, item->key, item->value);
-        }
-    }
-
-    ht->base_size = new_ht->base_size;
-    ht->count = new_ht->count;
-
-    // Give new_ht ht's size and items then delete it
-    const int tmp_size = ht->size;
-    ht->size = new_ht->size;
-    new_ht->size = tmp_size;
-
-    ht_item **tmp_items = ht->items;
-    ht->items = new_ht->items;
-    new_ht->items = tmp_items;
-
-    ht_del(new_ht);
-}
-
-static void ht_resize_up(hash_table *ht)
-{
-    const int new_base_size = ht->base_size * 2;
-    ht_resize(ht, new_base_size);
-}
-
-static void ht_resize_down(hash_table *ht)
-{
-    const int new_base_size = ht->base_size / 2;
-    ht_resize(ht, new_base_size);
-}
-
-// - load: filled buckets / total buckets
-// - use percentage to avoid doing floating point math
-static int load_percentage(hash_table *ht)
-{
-    return ht->count * 100 / ht->size;
 }

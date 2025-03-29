@@ -1,5 +1,7 @@
-// Check if a number is prime
-int is_prime(const int x);
+#ifndef PRIME_H
+#define PRIME_H
 
-// Find the next prime larger than or equal to x
-int next_prime(const int x);
+int is_prime(const int x);   // Check if a number is prime
+int next_prime(const int x); // Find the next prime >= x
+
+#endif
