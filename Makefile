@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -g -W -Wall
-SRC = build/main.c build/hash_table.c
-OBJ = build/main.o build/hash_table.o
+SRC = src/main.c src/hash_table.c src/prime.c
+OBJ = build/main.o build/hash_table.o build/prime.o
 TARGET = build/main
 
 all: build_dir $(TARGET)

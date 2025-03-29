@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "hash_table.h"
+#include "prime.h"
 
 // Initialize item
 static ht_item *ht_new_item(const char *key, const char *value)
@@ -14,23 +15,25 @@ static ht_item *ht_new_item(const char *key, const char *value)
     // Note: Save copies of 'key' and 'value'
 }
 
-// Initialize hash table
-hash_table *ht_new()
+static hash_table *ht_new_sized(const int base_size)
 {
-    hash_table *ht = malloc(sizeof(hash_table));
-    ht->capacity = 53;
-    ht->size = 0;
-    ht->items = calloc((size_t)ht->capacity, sizeof(ht_item *));
+    hash_table *ht = xmalloc(sizeof(hash_table));
+    ht->base_size = base_size;
+    ht->size = next_prime(base_size);
+    ht->count = 0;
+    ht->items = xcalloc((size_t)ht->size, sizeof(ht_item *));
     return ht;
+}
 
-    // Note:
-    // 1. Why use 53 for capacity:
-    // - Prime numbers are often used for hash table sizes to reduce collisions.
-    // - It prevents issues with certain hash functions that may distribute keys poorly.
-    //
-    // 2. Why use calloc() instead of malloc():
-    // - It initializes all allocated memory to NULL (zero-out memory).
-    // - This prevents dangling pointers in the ht->items array.
+// Initialize hash table
+static int HT_INITIAL_BASE_SIZE = 53;
+// Why use 53:
+// - Prime numbers are often used for hash table sizes to reduce collisions.
+// - It prevents issues with certain hash functions that may distribute keys poorly.
+
+static hash_table *ht_new()
+{
+    return ht_new_sized(HT_INITIAL_BASE_SIZE);
 }
 
 // Delete item
@@ -44,7 +47,7 @@ static void ht_del_item(ht_item *item)
 // Delete hash table
 void ht_del(hash_table *ht)
 {
-    for (int i = 0; i < ht->capacity; i++)
+    for (int i = 0; i < ht->size; i++)
     {
         ht_item *item = ht->items[i];
         if (item != NULL)
@@ -99,28 +102,36 @@ static int ht_get_hash(
 // - Insert the item into that bucket and increment hash table's size
 void ht_insert(hash_table *ht, const char *key, const char *value)
 {
+    // Resize up if the load is above 0.7
+    const int load = load_percentage(ht);
+    if (load > 70)
+    {
+        ht_resize_up(ht);
+    }
+
     ht_item *item = ht_new_item(key, value);
-    int index = ht_get_hash(item->key, ht->capacity, 0);
+    int index = ht_get_hash(item->key, ht->size, 0);
 
     ht_item *existing_item = ht->items[index];
     int attempt = 1;
     while (existing_item != NULL)
     {
-        // Overwrite value to the same key (don't increment size)
-        if (existing_item != &HT_DELETED_ITEM && strcmp(item->key, key) == 0) {
+        // Overwrite value to the same key
+        if (existing_item != &HT_DELETED_ITEM && strcmp(item->key, key) == 0)
+        {
             ht_del_item(existing_item);
             ht->items[index] = item;
             return;
         }
 
-        index = ht_get_hash(item->key, ht->capacity, attempt);
+        index = ht_get_hash(item->key, ht->size, attempt);
         existing_item = ht->items[index];
         attempt++;
     }
 
     // Insert the new item
     ht->items[index] = item;
-    ht->size++;
+    ht->count++;
 }
 
 // Search value by key
@@ -129,7 +140,7 @@ void ht_insert(hash_table *ht, const char *key, const char *value)
 // - If hitting a NULL bucket, return NULL (item not found)
 char *ht_search(hash_table *ht, const char *key)
 {
-    int index = ht_get_hash(key, ht->capacity, 0);
+    int index = ht_get_hash(key, ht->size, 0);
     ht_item *item = ht->items[index];
 
     int attempt = 1;
@@ -156,6 +167,13 @@ static ht_item HT_DELETED_ITEM = {NULL, NULL};
 
 void ht_delete(hash_table *ht, const char *key)
 {
+    // Resize down if the load is below 0.1
+    const int load = load_percentage(ht);
+    if (load < 10)
+    {
+        ht_resize_down(ht);
+    }
+
     int index = ht_get_hash(key, ht->size, 0);
     ht_item *item = ht->items[index];
 
@@ -166,11 +184,64 @@ void ht_delete(hash_table *ht, const char *key)
         {
             ht_del_item(item);
             ht->items[index] = &HT_DELETED_ITEM;
-            ht->size--;
+            ht->count--;
             return;
         }
 
         index = ht_get_hash(key, ht->size, attempt);
         attempt++;
     }
+}
+
+// Resize hash table
+static void ht_resize(hash_table *ht, const int base_size)
+{
+    // Don't reduce the size below the minimum
+    if (base_size < HT_INITIAL_BASE_SIZE)
+    {
+        return;
+    }
+
+    hash_table *new_ht = ht_new_sized(base_size);
+    for (int i = 0; i < ht->size; i++)
+    {
+        ht_item *item = ht->items[i];
+        if (item != NULL && item != &HT_DELETED_ITEM)
+        {
+            ht_insert(new_ht, item->key, item->value);
+        }
+    }
+
+    ht->base_size = new_ht->base_size;
+    ht->count = new_ht->count;
+
+    // Give new_ht ht's size and items then delete it
+    const int tmp_size = ht->size;
+    ht->size = new_ht->size;
+    new_ht->size = tmp_size;
+
+    ht_item **tmp_items = ht->items;
+    ht->items = new_ht->items;
+    new_ht->items = tmp_items;
+
+    ht_del(new_ht);
+}
+
+static void ht_resize_up(hash_table *ht)
+{
+    const int new_base_size = ht->base_size * 2;
+    ht_resize(ht, new_base_size);
+}
+
+static void ht_resize_down(hash_table *ht)
+{
+    const int new_base_size = ht->base_size / 2;
+    ht_resize(ht, new_base_size);
+}
+
+// - load: filled buckets / total buckets
+// - use percentage to avoid doing floating point math
+static int load_percentage(hash_table *ht)
+{
+    return ht->count * 100 / ht->size;
 }

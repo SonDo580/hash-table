@@ -6,8 +6,9 @@ typedef struct
 
 typedef struct
 {
-    int capacity;
+    int base_size;
     int size;
+    int count;
     ht_item **items; // an array of pointers to items
 } hash_table;
 
