@@ -10,7 +10,7 @@ build_dir:
 	mkdir -p build
 
 $(TARGET):$(OBJ)
-	$(CC) $(OBJ) -o $(TARGET)
+	$(CC) $(OBJ) -o $(TARGET) -lm
 
 build/%.o: src/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
